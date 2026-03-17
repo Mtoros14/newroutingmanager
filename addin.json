@@ -1,0 +1,16 @@
+{
+  "name": "Routing Module",
+  "supportEmail": "soporte@routemanager.com",
+  "version": "4.1.0",
+  "items": [
+    {
+      "page": "map",
+      "title": "routing-addin",
+      "noView": false,
+      "mapScript": {
+        "url": "https://mtoros14.github.io/routing-addin/index.html"
+      }
+    }
+  ],
+  "isSigned": false
+}
