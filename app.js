@@ -1,83 +1,85 @@
 /**
- * app.js
- * Entry point del Map Add-in de MyGeotab.
+ * app.js — Entry point del Map Add-in de MyGeotab v4.2.0
  *
- * CRÍTICO: La función debe registrarse en window.geotab.addin
- * con el nombre exacto del add-in. MyGeotab inyecta (elt, service)
- * automáticamente cuando el usuario abre el panel del add-in.
- *
- * service.api         → llamadas a la API de Geotab
- * service.events      → eventos del mapa (click, change, over, move)
- * service.canvas      → dibujar en el mapa (path, circle, marker, text)
- * service.map         → controlar viewport (setBounds, setZoom)
- * service.actionList  → menú contextual del mapa
- * service.tooltip     → tooltips sobre entidades
- * service.localStorage → persistencia entre sesiones
- * service.page        → focus/blur del panel, navegación
+ * FIXES:
+ *  - Carga de vehículos: usa multiCall para obtener Device + DeviceStatusInfo
+ *    en una sola llamada, y enriquece los datos con estado online/offline.
+ *  - Activa el add-in inmediatamente si ya está en foco al cargar.
  */
 
-// Namespace seguro para evitar colisiones con otros add-ins activos
 window.geotab = window.geotab || {};
 window.geotab.addin = window.geotab.addin || {};
 
 window.geotab.addin.routingAddin = function(elt, service) {
 
-  console.log('[RoutingAddin] Iniciando add-in v4.1.0...');
+  console.log('[RoutingAddin] Iniciando v4.2.0...');
 
-  // ─────────────────────────────────────────────
-  // 1. Inicializar todos los módulos con `service`
-  // ─────────────────────────────────────────────
-
+  // ── 1. Inicializar módulos ──────────────────────────────────────────
   rmExceptionsHandler.init(service);
   rmUIPanel.init(elt, service);
   rmRouteBuilder.init(service);
   rmTrackingEngine.init(service);
 
-  // ─────────────────────────────────────────────
-  // 2. Cargar lista de vehículos al inicio
-  // ─────────────────────────────────────────────
+  // ── 2. Cargar vehículos con multiCall ──────────────────────────────
+  // Device: lista de todos los dispositivos
+  // DeviceStatusInfo: estado de conectividad actual
+  service.api.multiCall([
+    ['Get', { typeName: 'Device', search: { activeFrom: '1986-01-01T00:00:00.000Z' } }],
+    ['Get', { typeName: 'DeviceStatusInfo' }]
+  ])
+  .then(([devices, statusInfos]) => {
+    // Crear mapa de estado por deviceId
+    const statusMap = {};
+    (statusInfos || []).forEach(si => {
+      if (si.device?.id) statusMap[si.device.id] = si;
+    });
 
-  service.api.call('Get', {
-    typeName: 'Device',
-    search: { activeFrom: '1986-01-01T00:00:00.000Z' }
-  }).then(devices => {
-    console.log(`[RoutingAddin] ${devices.length} vehículos cargados`);
-    rmUIPanel.populateVehicleList(devices);
-  }).catch(err => {
-    console.error('[RoutingAddin] Error cargando vehículos:', err);
-    rmUIPanel.populateVehicleList([]);
+    // Enriquecer cada device con datos de conectividad
+    const enriched = (devices || []).map(d => {
+      const si = statusMap[d.id];
+      return {
+        ...d,
+        _online: si ? (si.isDeviceCommunicating === true) : undefined,
+        _lastComm: si?.lastCommunicationDate || null,
+        _lat: si?.latitude || null,
+        _lng: si?.longitude || null
+      };
+    });
+
+    // Ordenar: online primero, luego alphabético
+    enriched.sort((a, b) => {
+      if (a._online && !b._online) return -1;
+      if (!a._online && b._online) return 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+
+    console.log(`[RoutingAddin] ${enriched.length} vehículos cargados`);
+    rmUIPanel.populateVehicleList(enriched);
+  })
+  .catch(err => {
+    console.error('[RoutingAddin] Error en multiCall vehículos:', err);
+    // Fallback: intentar cargar solo los Device sin status
+    service.api.call('Get', { typeName: 'Device', search: { activeFrom: '1986-01-01T00:00:00.000Z' } })
+      .then(devices => rmUIPanel.populateVehicleList(devices || []))
+      .catch(() => rmUIPanel.populateVehicleList([]));
   });
 
-  // ─────────────────────────────────────────────
-  // 3. Restaurar ruta guardada (si existía una sesión previa)
-  // ─────────────────────────────────────────────
-
-  rmTrackingEngine.restoreFromStorage();
-
-  // ─────────────────────────────────────────────
-  // 4. Eventos de focus/blur del panel
-  //    - focus: el usuario abre/activa este tab del add-in
-  //    - blur:  el usuario cambia a otro tab o add-in
-  // ─────────────────────────────────────────────
-
+  // ── 3. Focus / blur del panel ──────────────────────────────────────
   service.page.attach('focus', () => {
-    console.log('[RoutingAddin] Panel activado — captura de clicks en mapa ON');
+    console.log('[RoutingAddin] Panel activado — clicks en mapa ON');
     rmRouteBuilder.activate();
   });
 
   service.page.attach('blur', () => {
-    console.log('[RoutingAddin] Panel desactivado — captura de clicks en mapa OFF');
+    console.log('[RoutingAddin] Panel desactivado — clicks en mapa OFF');
     rmRouteBuilder.deactivate();
   });
 
-  // ─────────────────────────────────────────────
-  // 5. Activar inmediatamente si ya está en foco
-  //    (el evento focus no se dispara al cargar por primera vez)
-  // ─────────────────────────────────────────────
-
+  // ── 4. Activar inmediatamente si ya está en foco ───────────────────
+  // (el evento focus NO se dispara en la carga inicial)
   if (service.page.active) {
     rmRouteBuilder.activate();
   }
 
-  console.log('[RoutingAddin] Add-in inicializado correctamente ✓');
+  console.log('[RoutingAddin] Inicializado correctamente ✓');
 };
