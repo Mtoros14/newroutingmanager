@@ -1,7 +1,7 @@
 {
   "name": "Routing Module",
   "supportEmail": "soporte@routemanager.com",
-  "version": "4.2.0",
+  "version": "4.3.0",
   "items": [
     {
       "page": "map",
